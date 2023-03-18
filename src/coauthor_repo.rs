@@ -1,7 +1,9 @@
-use std::process::Command;
+use std::{ffi::OsStr, process::{Command, Output}};
 
 #[cfg(test)]
 use mockall::{automock, predicate::*};
+
+use crate::utils::CommandExecutor;
 #[cfg_attr(test, automock)]
 pub trait CoauthorRepo {
     fn list(&self, show_keys: bool) -> Vec<String>;
@@ -10,20 +12,28 @@ pub trait CoauthorRepo {
     fn remove(&self, key: &str);
     fn add(&self, key: &str, coauthor: &str);
     fn add_to_mob(&self, coauthor: &str);
-    fn clear_mob(&self);
+    fn clear_mob(&mut self);
 }
 
-pub struct GitConfigCoauthorRepo {}
-impl GitConfigCoauthorRepo {
+pub struct GitConfigCoauthorRepo<'a, E:CommandExecutor> {
+    executor: &'a mut E
+}
+impl<'a, E:CommandExecutor> GitConfigCoauthorRepo<'a, E> {
     const COAUTHORS_SECTION: &str = "coauthors";
     const COAUTHORS_MOB_SECTION: &str = "coauthors-mob";
     const COAUTHOR_MOB_KEY: &str = "entry";
-}
-type Gccr = GitConfigCoauthorRepo;
 
-impl CoauthorRepo for GitConfigCoauthorRepo {
+    pub fn new(executor: &'a mut E) -> Self {
+        Self {
+            executor,
+        }
+    }
+}
+type GCCR<'a, E> = GitConfigCoauthorRepo<'a, E>;
+
+impl<'a, E:CommandExecutor> CoauthorRepo for GitConfigCoauthorRepo<'a, E> {
     fn list(&self, show_keys: bool) -> Vec<String> {
-        let section = Gccr::COAUTHORS_SECTION;
+        let section = GCCR::<E>::COAUTHORS_SECTION;
         let search_regex = format!("^{section}\\.");
 
         let output = Command::new("git")
@@ -48,7 +58,7 @@ impl CoauthorRepo for GitConfigCoauthorRepo {
     }
 
     fn list_mob(&self) -> Vec<String> {
-        let full_key = format!("{}.{}", Gccr::COAUTHORS_MOB_SECTION, Gccr::COAUTHOR_MOB_KEY);
+        let full_key = format!("{}.{}", GCCR::<E>::COAUTHORS_MOB_SECTION, GCCR::<E>::COAUTHOR_MOB_KEY);
 
         let output = Command::new("git")
             .args(["config", "--global", "--get-all", &full_key])
@@ -63,7 +73,7 @@ impl CoauthorRepo for GitConfigCoauthorRepo {
     }
 
     fn get(&self, key: &str) -> Option<String> {
-        let full_key = format!("{}.{key}", Gccr::COAUTHORS_SECTION);
+        let full_key = format!("{}.{key}", GCCR::<E>::COAUTHORS_SECTION);
 
         let output = Command::new("git")
             .args(["config", "--global", &full_key])
@@ -82,7 +92,7 @@ impl CoauthorRepo for GitConfigCoauthorRepo {
     }
 
     fn remove(&self, key: &str) {
-        let full_key = format!("{}.{key}", Gccr::COAUTHORS_SECTION);
+        let full_key = format!("{}.{key}", GCCR::<E>::COAUTHORS_SECTION);
 
         let status = Command::new("git")
             .args(["config", "--global", "--unset-all", &full_key])
@@ -92,7 +102,7 @@ impl CoauthorRepo for GitConfigCoauthorRepo {
     }
 
     fn add(&self, key: &str, coauthor: &str) {
-        let full_key = format!("{}.{key}", Gccr::COAUTHORS_SECTION);
+        let full_key = format!("{}.{key}", GCCR::<E>::COAUTHORS_SECTION);
 
         let status = Command::new("git")
             .args(["config", "--global", &full_key, coauthor])
@@ -102,7 +112,7 @@ impl CoauthorRepo for GitConfigCoauthorRepo {
     }
 
     fn add_to_mob(&self, coauthor: &str) {
-        let full_key = format!("{}.{}", Gccr::COAUTHORS_MOB_SECTION, Gccr::COAUTHOR_MOB_KEY);
+        let full_key = format!("{}.{}", GCCR::<E>::COAUTHORS_MOB_SECTION, GCCR::<E>::COAUTHOR_MOB_KEY);
 
         let status = Command::new("git")
             .args(["config", "--global", "--add", &full_key, coauthor])
@@ -111,12 +121,9 @@ impl CoauthorRepo for GitConfigCoauthorRepo {
         assert!(status.success());
     }
 
-    fn clear_mob(&self) {
-        let section = Gccr::COAUTHORS_MOB_SECTION.to_owned();
+    fn clear_mob(&mut self) {
+        let section = format!("{}", GCCR::<E>::COAUTHORS_MOB_SECTION);
 
-        Command::new("git")
-            .args(["config", "--global", "--remove-section", &section])
-            .output()
-            .expect("failed to execute process");
+        self.executor.execute("git", ["config", "--global", "--remove-section", &section]);
     }
 }
